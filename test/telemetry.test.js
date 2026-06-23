@@ -108,6 +108,17 @@ test("race state appends run records and exports them from store", () => {
   assert.equal(records[0].pack_voltage_v, 20.67);
 });
 
+test("starting a run clears stale latest telemetry", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "iem-dashboard-start-"));
+  const store = new Store(tempDir);
+  const race = new RaceState(store);
+  const normalized = normalizePacket(parseBaseStationLine(sampleLine), Date.now());
+  race.ingest(normalized);
+  assert.equal(race.state.latest.pack_voltage_v, 20.67);
+  race.start({ targetFinishS: 2040, energyBudgetWh: 12 });
+  assert.equal(race.state.latest, null);
+});
+
 test("emulator creates valid dashboard telemetry packets", () => {
   const packet = createEmulatedPacket(42, 12345);
   const parsed = parseBaseStationLine(JSON.stringify(packet));

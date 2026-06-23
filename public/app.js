@@ -120,7 +120,7 @@ function render() {
   const active = race.active;
   const elapsedS = latest?.elapsed_s ?? (active ? (Date.now() - race.startedAtMs) / 1000 : 0);
   const targetS = race.targetFinishS || profile.defaultTargetFinishS;
-  const metrics = calculateMetrics(race, profile, latest, elapsedS, targetS);
+  const metrics = calculateMetrics(race, profile, latest, elapsedS, targetS, state.records);
   const sourceLabel = snap.serial.mode === "cloud" ? "Cloud ingest" : `${titleCase(snap.serial.mode || "source")} ${snap.serial.connected ? "connected" : "disconnected"}`;
 
   els.connectionText.textContent = `${sourceLabel} (${snap.serial.port || "no port"})`;
@@ -568,16 +568,12 @@ function setupCanvas(canvas) {
   return canvas.getContext("2d");
 }
 
-function calculateMetrics(race, profile, latest, elapsedS, targetS) {
+function calculateMetrics(race, profile, latest, elapsedS, targetS, records = []) {
   const targetWhPerKm = safeDivide(race.energyBudgetWh, profile.distanceKm);
-  const trackFraction = latest?.gps_fix ? estimateTrackFraction(latest.latitude, latest.longitude) : null;
   const lapDistance = profile.lapDistanceKm;
   const completedKm = Math.min(profile.distanceKm, Math.max(0, race.lap * lapDistance));
-  const gpsKm = Number.isFinite(trackFraction)
-    ? Math.min(profile.distanceKm, Math.max(completedKm, (race.lap + trackFraction) * lapDistance))
-    : completedKm;
-  const fallbackTargetKm = Math.min(profile.distanceKm, Math.max(0, safeDivide(elapsedS, targetS) * profile.distanceKm));
-  const distanceKm = Math.max(gpsKm, fallbackTargetKm * 0.25);
+  const fractionalKm = runFractionSinceStart(latest, records) * lapDistance;
+  const distanceKm = Math.min(profile.distanceKm, completedKm + fractionalKm);
   const speedKmh = elapsedS > 0 && distanceKm > 0 ? distanceKm / elapsedS * 3600 : null;
   const targetSpeedKmh = profile.distanceKm / targetS * 3600;
   const avgWhPerKm = distanceKm > 0 ? race.aggregateWh / distanceKm : null;
@@ -594,6 +590,18 @@ function calculateMetrics(race, profile, latest, elapsedS, targetS) {
     projectedTotalWh,
     energyHeadroomWh: race.energyBudgetWh - race.aggregateWh
   };
+}
+
+function runFractionSinceStart(latest, records) {
+  if (!latest?.gps_fix || records.length < 2) return 0;
+  const first = records.find(record => record.gps_fix && Number.isFinite(record.latitude) && Number.isFinite(record.longitude));
+  if (!first) return 0;
+  const startFraction = estimateTrackFraction(first.latitude, first.longitude);
+  const latestFraction = estimateTrackFraction(latest.latitude, latest.longitude);
+  if (!Number.isFinite(startFraction) || !Number.isFinite(latestFraction)) return 0;
+  let progress = latestFraction - startFraction;
+  if (progress < -0.2) progress += 1;
+  return clamp(progress, 0, 0.999);
 }
 
 function estimateTrackFraction(latitude, longitude) {

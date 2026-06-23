@@ -54,6 +54,7 @@ export class RaceState {
     this.state.lap = 0;
     this.state.lapTimes = [];
     this.state.lastCrossingMs = null;
+    this.state.latest = null;
     this.lastPacket = null;
     this.store.clearRun(this.state.currentRunId);
     this.persist();
