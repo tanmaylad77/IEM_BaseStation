@@ -176,6 +176,13 @@ test("HTTP ingest endpoint enforces token and validates packets", async () => {
     });
     assert.equal(invalid.status, 400);
 
+    const bootNoise = await fetch(`http://localhost:${port}/api/ingest`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-ingest-token": "test-secret" },
+      body: "ESP-ROM:esp32s3-20210327"
+    });
+    assert.equal(bootNoise.status, 400);
+
     const valid = await fetch(`http://localhost:${port}/api/ingest`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-ingest-token": "test-secret" },

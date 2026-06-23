@@ -62,7 +62,7 @@ async function route(req, res) {
       return sendJson(res, 401, { error: "Unauthorized ingest token" });
     }
 
-    const body = await readJson(req);
+    const body = await readText(req);
     const normalized = parseIngestBody(body);
     if (!normalized) {
       return sendJson(res, 400, { error: "Invalid telemetry packet" });
@@ -312,10 +312,14 @@ function sendJson(res, status, body) {
 }
 
 async function readJson(req) {
+  const text = await readText(req);
+  return text ? JSON.parse(text) : {};
+}
+
+async function readText(req) {
   const chunks = [];
   for await (const chunk of req) {
     chunks.push(chunk);
   }
-  const text = Buffer.concat(chunks).toString("utf8");
-  return text ? JSON.parse(text) : {};
+  return Buffer.concat(chunks).toString("utf8");
 }
