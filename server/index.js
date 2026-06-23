@@ -114,6 +114,13 @@ async function route(req, res) {
     return;
   }
 
+  const recordsMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/records\.json$/);
+  if (req.method === "GET" && recordsMatch) {
+    const limit = Math.min(5000, Math.max(1, Number(url.searchParams.get("limit") || 1800)));
+    const records = store.readRunRecords(decodeURIComponent(recordsMatch[1])).slice(-limit);
+    return sendJson(res, 200, { records });
+  }
+
   if (req.method === "GET") {
     return serveStatic(url.pathname, res);
   }

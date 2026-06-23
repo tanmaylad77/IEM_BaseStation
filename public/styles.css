@@ -1,14 +1,17 @@
 :root {
   color-scheme: light;
-  --bg: #f4f6f8;
+  --bg: #eef2f5;
   --panel: #ffffff;
   --ink: #17202a;
   --muted: #657386;
   --line: #d8dee8;
+  --grid: #e8edf3;
   --red: #c44536;
   --blue: #1f7a8c;
   --green: #4f772d;
   --amber: #b7791f;
+  --violet: #5b5f97;
+  --cyan: #2f80a0;
 }
 
 * { box-sizing: border-box; }
@@ -26,8 +29,11 @@ body {
   gap: 18px;
   align-items: center;
   padding: 16px 20px;
-  background: var(--panel);
+  background: #fbfcfe;
   border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 500;
 }
 
 h1, h2, p { margin: 0; }
@@ -80,6 +86,11 @@ button, .button {
   cursor: pointer;
 }
 
+button:hover, .button:hover {
+  border-color: #b7c2cf;
+  background: #f7f9fb;
+}
+
 #startBtn { background: var(--green); color: #fff; border-color: var(--green); }
 #stopBtn { background: var(--red); color: #fff; border-color: var(--red); }
 
@@ -89,17 +100,17 @@ main {
   gap: 14px;
 }
 
-.status-strip, .kpis {
+.status-strip, .kpis, .dashboard-grid {
   display: grid;
   gap: 10px;
 }
 
 .status-strip {
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
 }
 
 .kpis {
-  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
 }
 
 .status-strip > div, .kpi, .panel {
@@ -111,26 +122,78 @@ main {
 
 .status-strip > div, .kpi {
   padding: 12px 13px;
-  min-height: 72px;
+  min-height: 90px;
 }
 
-.status-strip span, .kpi span, .panel-heading span {
+.status-strip span, .kpi span, .panel-heading span, .efficiency-panel span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.status-strip strong, .kpi strong {
+.status-strip strong, .kpi strong, .efficiency-panel strong {
   display: block;
   margin-top: 7px;
-  font-size: 24px;
+  font-size: clamp(20px, 1.6vw, 24px);
   line-height: 1.1;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.dashboard-grid {
+.metric-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(360px, 0.7fr);
+  align-content: start;
+  gap: 7px;
+  position: relative;
+  overflow: hidden;
+}
+
+.metric-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--metric, var(--blue));
+}
+
+.metric-card strong {
+  margin-top: 0;
+}
+
+.metric-card small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.metric-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #eef2f6;
+  overflow: hidden;
+}
+
+.metric-fill {
+  height: 100%;
+  width: 0%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--metric, var(--blue));
+  transition: width 180ms ease;
+}
+
+.metric-power { --metric: var(--red); }
+.metric-energy { --metric: var(--green); }
+.metric-voltage { --metric: var(--blue); }
+.metric-current { --metric: var(--amber); }
+.metric-speed { --metric: var(--cyan); }
+.metric-radio { --metric: var(--violet); }
+
+.dashboard-grid {
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 14px;
+  align-items: start;
+  grid-auto-flow: dense;
 }
 
 .panel {
@@ -138,22 +201,78 @@ main {
   padding: 12px;
 }
 
+.chart-panel {
+  grid-column: span 6;
+  min-height: 300px;
+  resize: both;
+  overflow: auto;
+}
+
+.panel-wide {
+  grid-column: span 8;
+}
+
+.panel-compact {
+  grid-column: span 4;
+}
+
+.metric-radio strong {
+  font-size: clamp(18px, 1.35vw, 22px);
+}
+
+.panel.drag-over {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
 .panel-heading {
   display: flex;
   justify-content: space-between;
+  align-items: flex-start;
   gap: 12px;
   margin-bottom: 8px;
 }
 
+.panel-heading h2 {
+  margin-bottom: 3px;
+}
+
+.panel-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.icon-button, .tool-button {
+  height: 28px;
+  border-radius: 5px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.drag-handle {
+  cursor: grab;
+  letter-spacing: 1px;
+  font-weight: 800;
+}
+
 canvas {
   width: 100%;
-  height: 320px;
+  height: 340px;
   display: block;
+  cursor: grab;
+  touch-action: none;
+}
+
+canvas:active {
+  cursor: grabbing;
 }
 
 #trackMap {
   width: 100%;
-  height: 320px;
+  height: 340px;
   border: 1px solid var(--line);
   border-radius: 6px;
   overflow: hidden;
@@ -172,6 +291,20 @@ canvas {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.efficiency-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.efficiency-panel > div {
+  min-height: 86px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfe;
 }
 
 table {
@@ -198,6 +331,7 @@ th { color: var(--muted); font-weight: 650; }
   .controls { justify-content: flex-start; }
   .status-strip, .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dashboard-grid { grid-template-columns: 1fr; }
+  .chart-panel, .panel-wide, .panel-compact { grid-column: auto; }
 }
 
 @media (max-width: 620px) {
@@ -205,4 +339,6 @@ th { color: var(--muted); font-weight: 650; }
   .status-strip, .kpis { grid-template-columns: 1fr; }
   .status-strip strong, .kpi strong { font-size: 22px; }
   canvas { height: 260px; }
+  .efficiency-panel { grid-template-columns: 1fr; }
+  .chart-panel { resize: vertical; }
 }

@@ -193,6 +193,11 @@ test("HTTP ingest endpoint enforces token and validates packets", async () => {
     const state = await fetch(`http://localhost:${port}/api/state`).then(response => response.json());
     assert.equal(state.serial.mode, "cloud");
     assert.equal(state.race.latest.seq, 7);
+
+    const records = await fetch(`http://localhost:${port}/api/runs/${encodeURIComponent(state.race.currentRunId)}/records.json?limit=1`)
+      .then(response => response.json());
+    assert.equal(records.records.length, 1);
+    assert.equal(records.records[0].seq, 7);
   } finally {
     child.kill();
     await new Promise(resolve => child.once("exit", resolve));

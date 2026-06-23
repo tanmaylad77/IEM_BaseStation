@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>IEM Race Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f7a8c'/%3E%3Cpath d='M7 21h18M8 16l5-6 5 7 3-4 3 3' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -31,58 +32,131 @@
       <div><span>Laps</span><strong id="laps">0 / 11</strong></div>
       <div><span>Delta</span><strong id="delta">+0.0 s</strong></div>
       <div><span>Predicted</span><strong id="predicted">--</strong></div>
+      <div><span>Efficiency</span><strong id="efficiency">-- Wh/km</strong></div>
     </section>
 
     <section class="kpis">
-      <div class="kpi"><span>Power</span><strong id="power">-- W</strong></div>
-      <div class="kpi"><span>Aggregate energy</span><strong id="energy">0.00 Wh</strong></div>
-      <div class="kpi"><span>Voltage</span><strong id="voltage">-- V</strong></div>
-      <div class="kpi"><span>Current</span><strong id="current">-- A</strong></div>
-      <div class="kpi"><span>Radio</span><strong id="radio">--</strong></div>
+      <div class="kpi metric-card metric-power">
+        <span>Power</span>
+        <strong id="power">-- W</strong>
+        <div class="metric-track"><div id="powerFill" class="metric-fill"></div></div>
+        <small id="powerHint">Live draw</small>
+      </div>
+      <div class="kpi metric-card metric-energy">
+        <span>Aggregate energy</span>
+        <strong id="energy">0.00 Wh</strong>
+        <div class="metric-track"><div id="energyFill" class="metric-fill"></div></div>
+        <small id="energyHint">Budget -- Wh</small>
+      </div>
+      <div class="kpi metric-card metric-voltage">
+        <span>Voltage</span>
+        <strong id="voltage">-- V</strong>
+        <div class="metric-track"><div id="voltageFill" class="metric-fill"></div></div>
+        <small id="voltageHint">Pack voltage</small>
+      </div>
+      <div class="kpi metric-card metric-current">
+        <span>Current</span>
+        <strong id="current">-- A</strong>
+        <div class="metric-track"><div id="currentFill" class="metric-fill"></div></div>
+        <small id="currentHint">Signed pack current</small>
+      </div>
+      <div class="kpi metric-card metric-speed">
+        <span>Speed</span>
+        <strong id="speed">-- km/h</strong>
+        <div class="metric-track"><div id="speedFill" class="metric-fill"></div></div>
+        <small id="speedHint">Target -- km/h</small>
+      </div>
+      <div class="kpi metric-card metric-radio">
+        <span>Radio</span>
+        <strong id="radio">--</strong>
+        <div class="metric-track"><div id="radioFill" class="metric-fill"></div></div>
+        <small id="radioHint">RSSI / SNR</small>
+      </div>
     </section>
 
-    <section class="dashboard-grid">
-      <div class="panel">
+    <section id="panelGrid" class="dashboard-grid">
+      <div class="panel chart-panel panel-wide" draggable="true" data-panel-id="power">
         <div class="panel-heading">
-          <h2>Power and Energy</h2>
-          <span id="packetAge">No packets yet</span>
+          <div>
+            <h2>Power and Energy</h2>
+            <span id="packetAge">No packets yet</span>
+          </div>
+          <div class="panel-tools">
+            <button class="icon-button drag-handle" type="button" title="Move panel" aria-label="Move panel">::</button>
+            <button class="tool-button" type="button" data-chart-reset="powerChart">Fit</button>
+          </div>
         </div>
-        <canvas id="powerChart" width="900" height="360"></canvas>
+        <canvas id="powerChart" width="900" height="360" data-chart-key="power"></canvas>
       </div>
-      <div class="panel">
+      <div class="panel chart-panel panel-compact" draggable="true" data-panel-id="progress">
         <div class="panel-heading">
-          <h2>Race Progress</h2>
-          <span id="paceText">Target: 11 laps in 34:00</span>
+          <div>
+            <h2>Race Progress</h2>
+            <span id="paceText">Target: 11 laps in 34:00</span>
+          </div>
+          <div class="panel-tools">
+            <button class="icon-button drag-handle" type="button" title="Move panel" aria-label="Move panel">::</button>
+            <button class="tool-button" type="button" data-chart-reset="progressChart">Fit</button>
+          </div>
         </div>
-        <canvas id="progressChart" width="520" height="360"></canvas>
+        <canvas id="progressChart" width="520" height="360" data-chart-key="progress"></canvas>
       </div>
-    </section>
-
-    <section class="dashboard-grid">
-      <div class="panel">
-        <h2>Voltage and Current</h2>
-        <canvas id="electricalChart" width="900" height="320"></canvas>
-      </div>
-      <div class="panel">
+      <div class="panel chart-panel panel-wide" draggable="true" data-panel-id="electrical">
         <div class="panel-heading">
-          <h2>Silesia Ring Track Map</h2>
-          <span id="mapStatus">Waiting for GPS</span>
+          <div>
+            <h2>Voltage and Current</h2>
+            <span id="electricalText">Waiting for packets</span>
+          </div>
+          <div class="panel-tools">
+            <button class="icon-button drag-handle" type="button" title="Move panel" aria-label="Move panel">::</button>
+            <button class="tool-button" type="button" data-chart-reset="electricalChart">Fit</button>
+          </div>
+        </div>
+        <canvas id="electricalChart" width="900" height="320" data-chart-key="electrical"></canvas>
+      </div>
+      <div class="panel chart-panel panel-compact" draggable="true" data-panel-id="map">
+        <div class="panel-heading">
+          <div>
+            <h2>Silesia Ring Track Map</h2>
+            <span id="mapStatus">Waiting for GPS</span>
+          </div>
+          <div class="panel-tools">
+            <button class="icon-button drag-handle" type="button" title="Move panel" aria-label="Move panel">::</button>
+          </div>
         </div>
         <div id="trackMap"></div>
       </div>
-    </section>
-
-    <section class="dashboard-grid">
-      <div class="panel">
-        <h2>Lap Times</h2>
+      <div class="panel chart-panel" draggable="true" data-panel-id="laps">
+        <div class="panel-heading">
+          <div>
+            <h2>Lap Times</h2>
+            <span id="lapText">No laps counted yet</span>
+          </div>
+          <div class="panel-tools">
+            <button class="icon-button drag-handle" type="button" title="Move panel" aria-label="Move panel">::</button>
+          </div>
+        </div>
         <table id="lapTable">
           <thead><tr><th>Lap</th><th>Elapsed</th><th>Lap time</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
-      <div class="panel">
-        <h2>Map Notes</h2>
-        <p class="notes">The map uses OpenStreetMap tiles centered on Silesia Ring, Kamien Slaski. The marker appears when telemetry has a GPS fix and valid latitude/longitude.</p>
+      <div class="panel chart-panel" draggable="true" data-panel-id="efficiency">
+        <div class="panel-heading">
+          <div>
+            <h2>Energy Pace</h2>
+            <span id="efficiencyText">Waiting for run data</span>
+          </div>
+          <div class="panel-tools">
+            <button class="icon-button drag-handle" type="button" title="Move panel" aria-label="Move panel">::</button>
+          </div>
+        </div>
+        <div class="efficiency-panel">
+          <div><span>Target</span><strong id="targetEfficiency">-- Wh/km</strong></div>
+          <div><span>Projected</span><strong id="projectedEnergy">-- Wh</strong></div>
+          <div><span>Energy headroom</span><strong id="energyHeadroom">-- Wh</strong></div>
+          <div><span>Distance estimate</span><strong id="distanceEstimate">-- km</strong></div>
+        </div>
       </div>
     </section>
   </main>
