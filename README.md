@@ -20,6 +20,118 @@ pio run --target upload
 pio device monitor --baud 115200
 ```
 
+## Live Dashboard
+
+Install dependencies once:
+
+```sh
+npm install
+```
+
+Run against the connected base-station receiver:
+
+```sh
+SERIAL_PORT=/dev/cu.usbmodemXXXX npm start
+```
+
+For race use, prefer selecting the receiver by USB serial number so reconnects survive path changes:
+
+```sh
+SERIAL_NUMBER=D0CF133991B4 npm start
+```
+
+Open `http://localhost:3000`.
+
+### Public Race-Day Access
+
+The dashboard runs on the trackside laptop because it needs USB serial access to the receiver. To let multiple people view it from phones or laptops, expose the local dashboard with a temporary Cloudflare Quick Tunnel.
+
+Install Cloudflare Tunnel once if it is not already installed:
+
+```sh
+brew install cloudflared
+```
+
+Race-day flow:
+
+```sh
+SERIAL_NUMBER=D0CF133991B4 npm start
+```
+
+In a second terminal:
+
+```sh
+npm run tunnel:cloudflare
+```
+
+Copy the generated `https://*.trycloudflare.com` URL and share it with the team. Anyone with the link can view the dashboard; there is no login in v1, and operator controls are visible, so only share the link with trusted people.
+
+Fallbacks:
+
+```sh
+npm run tunnel:ngrok
+```
+
+If internet access is unreliable, keep everyone on the same Wi-Fi/hotspot and open:
+
+```text
+http://<trackside-laptop-ip>:3000
+```
+
+For UI testing without hardware:
+
+```sh
+REPLAY_FILE=test/fixtures/base-station-sample.ndjson npm start
+```
+
+For a continuously updating dashboard without hardware:
+
+```sh
+npm run start:emulator
+```
+
+The dashboard stores packets under `data/`, streams live updates over WebSocket, and exports each run as CSV from the dashboard export button or `GET /api/runs/:id/export.csv`.
+
+## Cloud Dashboard
+
+For the cloud-hosted race setup, deploy this repo as a Render Web Service. The included `render.yaml` uses:
+
+```text
+Build command: npm install
+Start command: npm run start:cloud
+```
+
+Set these Render environment variables:
+
+```text
+NODE_ENV=production
+CLOUD_ONLY=1
+INGEST_TOKEN=<long-random-secret>
+```
+
+The ESP32 base station uploads telemetry to:
+
+```text
+https://<your-render-service>.onrender.com/api/ingest
+```
+
+`POST /api/ingest` requires:
+
+```text
+content-type: application/json
+x-ingest-token: <same INGEST_TOKEN>
+```
+
+Responses:
+
+```text
+204 success
+400 invalid telemetry packet
+401 missing or wrong ingest token
+```
+
+Configure the ESP32 by copying `include/secrets.example.h` to `include/secrets.h` and filling in `WIFI_SSID`, `WIFI_PASSWORD`, `INGEST_URL`, and `INGEST_TOKEN`.
+
 ## Current Radio Settings
 
 | Setting | Value |

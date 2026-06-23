@@ -1,10 +1,33 @@
 #include <Arduino.h>
 #include <Adafruit_BusIO_Register.h>
+#include <HTTPClient.h>
 #include <RadioLib.h>
 #include <SPI.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
+#ifndef WIFI_SSID
+#define WIFI_SSID ""
+#endif
+
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD ""
+#endif
+
+#ifndef INGEST_URL
+#define INGEST_URL ""
+#endif
+
+#ifndef INGEST_TOKEN
+#define INGEST_TOKEN ""
+#endif
 
 #define SERIAL_BAUD 115200
 
@@ -26,10 +49,15 @@
 #define LORA_POWER_DBM 10
 #define LORA_PREAMBLE_LEN 8
 #define LORA_GAIN 0
+#define WIFI_RECONNECT_INTERVAL_MS 5000
+#define CLOUD_UPLOAD_INTERVAL_MS 1000
+#define CLOUD_UPLOAD_TIMEOUT_MS 2500
 
 SX1278 radio = new Module(LORA_CS, LORA_INT, LORA_RST);
 
 static uint32_t packetSequence = 0;
+static uint32_t lastWifiAttemptMs = 0;
+static uint32_t lastCloudUploadMs = 0;
 
 struct ParsedTelemetryPacket {
   bool matched = false;
@@ -49,40 +77,45 @@ struct ParsedTelemetryPacket {
   uint16_t validFlags = 0;
 };
 
-static void printJsonEscaped(const String &value) {
+static String jsonEscape(const String &value) {
+  String escaped;
+  escaped.reserve(value.length() + 8);
   for (size_t i = 0; i < value.length(); i++) {
     char c = value[i];
     switch (c) {
       case '"':
-        Serial.print("\\\"");
+        escaped += "\\\"";
         break;
       case '\\':
-        Serial.print("\\\\");
+        escaped += "\\\\";
         break;
       case '\b':
-        Serial.print("\\b");
+        escaped += "\\b";
         break;
       case '\f':
-        Serial.print("\\f");
+        escaped += "\\f";
         break;
       case '\n':
-        Serial.print("\\n");
+        escaped += "\\n";
         break;
       case '\r':
-        Serial.print("\\r");
+        escaped += "\\r";
         break;
       case '\t':
-        Serial.print("\\t");
+        escaped += "\\t";
         break;
       default:
         if ((uint8_t)c < 0x20) {
-          Serial.printf("\\u%04X", c);
+          char buffer[7];
+          snprintf(buffer, sizeof(buffer), "\\u%04X", c);
+          escaped += buffer;
         } else {
-          Serial.print(c);
+          escaped += c;
         }
         break;
     }
   }
+  return escaped;
 }
 
 static bool parseHemisphereValue(const char *value, float &number, char &hemisphere) {
@@ -180,66 +213,54 @@ static void printStatusEvent(const char *event, int code = RADIOLIB_ERR_NONE) {
   Serial.println("}");
 }
 
-static void printReceiveEvent(const String &payload) {
+static String formatReceiveEvent(const String &payload) {
   ParsedTelemetryPacket parsed = parseTelemetryPacket(payload);
+  String event;
+  event.reserve(360);
 
-  Serial.print("{\"schema\":\"iem.lora.rx.v1\",\"type\":\"telemetry\",\"ms\":");
-  Serial.print(millis());
-  Serial.print(",\"seq\":");
-  Serial.print(++packetSequence);
-  Serial.print(",\"radio\":{\"rssi_dbm\":");
-  Serial.print(radio.getRSSI(), 1);
-  Serial.print(",\"snr_db\":");
-  Serial.print(radio.getSNR(), 1);
-  Serial.print(",\"freq_error_hz\":");
-  Serial.print(radio.getFrequencyError());
-  Serial.print("},\"payload_format\":\"");
-  Serial.print(parsed.matched ? "telemetryv2_kv_v1" : "raw");
-  Serial.print("\",\"payload_raw\":\"");
-  printJsonEscaped(payload);
-  Serial.print("\"");
+  event += "{\"schema\":\"iem.lora.rx.v1\",\"type\":\"telemetry\",\"ms\":";
+  event += String(millis());
+  event += ",\"seq\":";
+  event += String(++packetSequence);
+  event += ",\"radio\":{\"rssi_dbm\":";
+  event += String(radio.getRSSI(), 1);
+  event += ",\"snr_db\":";
+  event += String(radio.getSNR(), 1);
+  event += ",\"freq_error_hz\":";
+  event += String(radio.getFrequencyError());
+  event += "},\"payload_format\":\"";
+  event += parsed.matched ? "telemetryv2_kv_v1" : "raw";
+  event += "\",\"payload_raw\":\"";
+  event += jsonEscape(payload);
+  event += "\"";
 
   if (parsed.matched) {
-    Serial.print(",\"fields\":{\"source_ms\":");
-    Serial.print(parsed.sourceMs);
-    Serial.print(",\"gps_fix\":");
-    Serial.print(parsed.gpsFix);
-    Serial.print(",\"latitude\":");
-    Serial.print(parsed.latitude, 5);
-    Serial.print(",\"latitude_hemi\":\"");
-    Serial.print(parsed.latitudeHemisphere ? parsed.latitudeHemisphere : 'N');
-    Serial.print("\",\"longitude\":");
-    Serial.print(parsed.longitude, 5);
-    Serial.print(",\"longitude_hemi\":\"");
-    Serial.print(parsed.longitudeHemisphere ? parsed.longitudeHemisphere : 'E');
-    Serial.print("\",\"pack_voltage_v\":");
-    Serial.print(parsed.packVoltageV, 2);
-    Serial.print(",\"pack_current_a\":");
-    Serial.print(parsed.packCurrentA, 2);
-    Serial.print(",\"pack_power_w\":");
-    Serial.print(parsed.packPowerW, 1);
-    Serial.print(",\"soc_percent\":");
-    Serial.print(parsed.socPercent);
-    Serial.print(",\"bms_state\":");
-    Serial.print(parsed.bmsState);
-    Serial.print(",\"throttle_0_to_1\":");
-    Serial.print(parsed.throttle, 2);
-    Serial.print(",\"wheel_speed_rad_s\":");
-    Serial.print(parsed.wheelSpeedRadS, 2);
-    Serial.print(",\"valid_flags\":");
-    Serial.print(parsed.validFlags);
-    Serial.print(",\"valid_flags_hex\":\"0x");
-    if (parsed.validFlags < 0x100) {
-      Serial.print("0");
-    }
-    if (parsed.validFlags < 0x10) {
-      Serial.print("0");
-    }
-    Serial.print(parsed.validFlags, HEX);
-    Serial.print("\"}");
+    char fields[420];
+    snprintf(fields, sizeof(fields),
+             ",\"fields\":{\"source_ms\":%lu,\"gps_fix\":%u,\"latitude\":%.5f,\"latitude_hemi\":\"%c\","
+             "\"longitude\":%.5f,\"longitude_hemi\":\"%c\",\"pack_voltage_v\":%.2f,\"pack_current_a\":%.2f,"
+             "\"pack_power_w\":%.1f,\"soc_percent\":%u,\"bms_state\":%u,\"throttle_0_to_1\":%.2f,"
+             "\"wheel_speed_rad_s\":%.2f,\"valid_flags\":%u,\"valid_flags_hex\":\"0x%03X\"}",
+             parsed.sourceMs,
+             parsed.gpsFix,
+             parsed.latitude,
+             parsed.latitudeHemisphere ? parsed.latitudeHemisphere : 'N',
+             parsed.longitude,
+             parsed.longitudeHemisphere ? parsed.longitudeHemisphere : 'E',
+             parsed.packVoltageV,
+             parsed.packCurrentA,
+             parsed.packPowerW,
+             parsed.socPercent,
+             parsed.bmsState,
+             parsed.throttle,
+             parsed.wheelSpeedRadS,
+             parsed.validFlags,
+             parsed.validFlags);
+    event += fields;
   }
 
-  Serial.println("}");
+  event += "}";
+  return event;
 }
 
 static void setupPins() {
@@ -278,6 +299,77 @@ static void setupLoRa() {
   printStatusEvent("radio_ready");
 }
 
+static bool hasCloudConfig() {
+  return strlen(WIFI_SSID) > 0 && strlen(INGEST_URL) > 0 && strlen(INGEST_TOKEN) > 0;
+}
+
+static void setupWiFi() {
+  if (!hasCloudConfig()) {
+    printStatusEvent("cloud_upload_disabled");
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  lastWifiAttemptMs = millis();
+  printStatusEvent("wifi_connecting");
+}
+
+static void maintainWiFi() {
+  if (!hasCloudConfig() || WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+
+  if (millis() - lastWifiAttemptMs >= WIFI_RECONNECT_INTERVAL_MS) {
+    lastWifiAttemptMs = millis();
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    printStatusEvent("wifi_reconnecting");
+  }
+}
+
+static void uploadTelemetry(const String &event) {
+  if (!hasCloudConfig()) {
+    return;
+  }
+
+  if (millis() - lastCloudUploadMs < CLOUD_UPLOAD_INTERVAL_MS) {
+    return;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    maintainWiFi();
+    return;
+  }
+
+  lastCloudUploadMs = millis();
+
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.setTimeout(CLOUD_UPLOAD_TIMEOUT_MS);
+  if (!http.begin(client, INGEST_URL)) {
+    printStatusEvent("cloud_http_begin_failed");
+    return;
+  }
+
+  http.addHeader("content-type", "application/json");
+  http.addHeader("x-ingest-token", INGEST_TOKEN);
+  int status = http.POST((uint8_t *)event.c_str(), event.length());
+
+  if (status < 200 || status >= 300) {
+    Serial.print("{\"schema\":\"iem.base.status.v1\",\"type\":\"status\",\"ms\":");
+    Serial.print(millis());
+    Serial.print(",\"event\":\"cloud_upload_failed\",\"code\":");
+    Serial.print(status);
+    Serial.println("}");
+  }
+
+  http.end();
+}
+
 void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(2000);
@@ -285,15 +377,20 @@ void setup() {
   setupPins();
   printStatusEvent("boot");
   setupLoRa();
+  setupWiFi();
 }
 
 void loop() {
+  maintainWiFi();
+
   String payload;
   int state = radio.receive(payload);
 
   if (state == RADIOLIB_ERR_NONE) {
     digitalWrite(LED, HIGH);
-    printReceiveEvent(payload);
+    String event = formatReceiveEvent(payload);
+    Serial.println(event);
+    uploadTelemetry(event);
     digitalWrite(LED, LOW);
   } else if (state != RADIOLIB_ERR_RX_TIMEOUT) {
     printStatusEvent("receive_failed", state);

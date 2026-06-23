@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: iem-base-station-dashboard
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run start:cloud
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CLOUD_ONLY
+        value: "1"
+      - key: INGEST_TOKEN
+        sync: false
