@@ -21,6 +21,14 @@
 #define WIFI_PASSWORD ""
 #endif
 
+#ifndef WIFI_BACKUP_SSID
+#define WIFI_BACKUP_SSID ""
+#endif
+
+#ifndef WIFI_BACKUP_PASSWORD
+#define WIFI_BACKUP_PASSWORD ""
+#endif
+
 #ifndef INGEST_URL
 #define INGEST_URL ""
 #endif
@@ -58,6 +66,7 @@ SX1278 radio = new Module(LORA_CS, LORA_INT, LORA_RST);
 static uint32_t packetSequence = 0;
 static uint32_t lastWifiAttemptMs = 0;
 static uint32_t lastCloudUploadMs = 0;
+static uint8_t wifiNetworkIndex = 0;
 
 struct ParsedTelemetryPacket {
   bool matched = false;
@@ -303,6 +312,29 @@ static bool hasCloudConfig() {
   return strlen(WIFI_SSID) > 0 && strlen(INGEST_URL) > 0 && strlen(INGEST_TOKEN) > 0;
 }
 
+static const char *wifiSsidForIndex(uint8_t index) {
+  return index == 1 ? WIFI_BACKUP_SSID : WIFI_SSID;
+}
+
+static const char *wifiPasswordForIndex(uint8_t index) {
+  return index == 1 ? WIFI_BACKUP_PASSWORD : WIFI_PASSWORD;
+}
+
+static uint8_t wifiNetworkCount() {
+  return strlen(WIFI_BACKUP_SSID) > 0 ? 2 : 1;
+}
+
+static void beginWiFiConnection() {
+  const char *ssid = wifiSsidForIndex(wifiNetworkIndex);
+  const char *password = wifiPasswordForIndex(wifiNetworkIndex);
+
+  if (strlen(password) == 0) {
+    WiFi.begin(ssid);
+  } else {
+    WiFi.begin(ssid, password);
+  }
+}
+
 static void setupWiFi() {
   if (!hasCloudConfig()) {
     printStatusEvent("cloud_upload_disabled");
@@ -311,7 +343,7 @@ static void setupWiFi() {
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  beginWiFiConnection();
   lastWifiAttemptMs = millis();
   printStatusEvent("wifi_connecting");
 }
@@ -324,7 +356,8 @@ static void maintainWiFi() {
   if (millis() - lastWifiAttemptMs >= WIFI_RECONNECT_INTERVAL_MS) {
     lastWifiAttemptMs = millis();
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    wifiNetworkIndex = (wifiNetworkIndex + 1) % wifiNetworkCount();
+    beginWiFiConnection();
     printStatusEvent("wifi_reconnecting");
   }
 }
