@@ -9,6 +9,7 @@ import { recordsToCsv } from "../server/csv.js";
 import { createEmulatedPacket } from "../server/emulator.js";
 import { authorizeIngest, ingestTelemetryPacket, parseIngestBody } from "../server/ingest.js";
 import { RaceState } from "../server/race.js";
+import { bridgeConfigFromEnv, parseBridgeLine, uploadPacket } from "../server/serial-bridge.js";
 import { Store } from "../server/store.js";
 import {
   computeTargetDelta,
@@ -146,6 +147,34 @@ test("cloud ingest accepts valid packet bodies and rejects invalid bodies", () =
   assert.equal(parseIngestBody("not json"), null);
 });
 
+test("serial cloud bridge filters lines and sends ingest token", async () => {
+  assert.equal(parseBridgeLine("ESP-ROM:esp32s3-20210327"), null);
+  assert.equal(parseBridgeLine(JSON.stringify({ schema: "iem.base.status.v1", type: "status" })), null);
+  assert.equal(parseBridgeLine(sampleLine).seq, 1);
+
+  const config = bridgeConfigFromEnv({
+    CLOUD_INGEST_URL: "https://example.test/api/ingest",
+    INGEST_TOKEN: "test-secret",
+    SERIAL_BAUD: "9600",
+    BRIDGE_UPLOAD_ATTEMPTS: "2"
+  });
+  assert.equal(config.ingestUrl, "https://example.test/api/ingest");
+  assert.equal(config.ingestToken, "test-secret");
+  assert.equal(config.baudRate, 9600);
+  assert.equal(config.maxUploadAttempts, 2);
+
+  let request;
+  await uploadPacket(parseBridgeLine(sampleLine), config, async (url, options) => {
+    request = { url, options };
+    return new Response("", { status: 200 });
+  });
+
+  assert.equal(request.url, "https://example.test/api/ingest");
+  assert.equal(request.options.method, "POST");
+  assert.equal(request.options.headers["x-ingest-token"], "test-secret");
+  assert.equal(JSON.parse(request.options.body).schema, "iem.lora.rx.v1");
+});
+
 test("cloud ingest path updates race state", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "iem-cloud-ingest-"));
   const store = new Store(tempDir);
@@ -215,6 +244,56 @@ test("HTTP ingest endpoint enforces token and validates packets", async () => {
   }
 });
 
+test("serial cloud bridge replay uploads valid fixture packets to cloud ingest", async () => {
+  const port = 4700 + Math.floor(Math.random() * 500);
+  const child = spawn(process.execPath, ["server/index.js"], {
+    cwd: path.resolve(import.meta.dirname, ".."),
+    env: {
+      ...process.env,
+      PORT: String(port),
+      CLOUD_ONLY: "1",
+      INGEST_TOKEN: "test-secret"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+
+  try {
+    await waitForServer(`http://localhost:${port}/api/state`);
+    await fetch(`http://localhost:${port}/api/run/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetFinishS: 2040, energyBudgetWh: 12 })
+    });
+
+    const bridge = spawn(process.execPath, ["server/serial-bridge.js"], {
+      cwd: path.resolve(import.meta.dirname, ".."),
+      env: {
+        ...process.env,
+        CLOUD_INGEST_URL: `http://localhost:${port}/api/ingest`,
+        INGEST_TOKEN: "test-secret",
+        BRIDGE_REPLAY_FILE: "test/fixtures/base-station-sample.ndjson",
+        BRIDGE_REPLAY_DELAY_MS: "1",
+        BRIDGE_UPLOAD_ATTEMPTS: "1"
+      },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    const exitCode = await waitForExit(bridge);
+    assert.equal(exitCode, 0);
+
+    const state = await fetch(`http://localhost:${port}/api/state`).then(response => response.json());
+    assert.equal(state.race.latest.seq, 3);
+
+    const records = await fetch(`http://localhost:${port}/api/runs/${encodeURIComponent(state.race.currentRunId)}/records.json?limit=10`)
+      .then(response => response.json());
+    assert.equal(records.records.length, 3);
+    assert.deepEqual(records.records.map(record => record.seq), [1, 2, 3]);
+  } finally {
+    child.kill();
+    await new Promise(resolve => child.once("exit", resolve));
+  }
+});
+
 async function waitForServer(url) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < 5000) {
@@ -229,4 +308,21 @@ async function waitForServer(url) {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   throw new Error(`Server did not start: ${url}`);
+}
+
+async function waitForExit(child) {
+  return new Promise((resolve, reject) => {
+    let stderr = "";
+    child.stderr.on("data", chunk => {
+      stderr += chunk;
+    });
+    child.once("error", reject);
+    child.once("exit", code => {
+      if (code === 0) {
+        resolve(code);
+      } else {
+        reject(new Error(`Child exited with ${code}: ${stderr}`));
+      }
+    });
+  });
 }

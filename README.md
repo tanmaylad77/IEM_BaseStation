@@ -96,7 +96,7 @@ The dashboard stores packets under `data/`, streams live updates over WebSocket,
 
 The receiver firmware is serial-only. It does not join Wi-Fi or upload directly to the cloud.
 
-The Node app still has an optional cloud-ingest mode for emulator testing or a future serial-to-cloud bridge. To deploy that server on Render, the included `render.yaml` uses:
+The Node app has an optional cloud-ingest mode for the serial-to-cloud bridge. To deploy that server on Render, the included `render.yaml` uses:
 
 ```text
 Build command: npm install
@@ -132,7 +132,35 @@ Responses:
 401 missing or wrong ingest token
 ```
 
-Race-day operation currently uses the USB Serial dashboard plus Cloudflare Quick Tunnel.
+### Serial-to-Cloud Bridge
+
+Use this when the public Render dashboard should be the shared race dashboard. The laptop owns the receiver USB serial port and forwards valid LoRa packets to the cloud server.
+
+```sh
+INGEST_TOKEN=<same-token-as-render> \
+SERIAL_NUMBER=D0CF133991B4 \
+CLOUD_INGEST_URL=https://iem-base-station-dashboard.onrender.com/api/ingest \
+npm run bridge:cloud
+```
+
+Open the public dashboard:
+
+```text
+https://iem-base-station-dashboard.onrender.com
+```
+
+The bridge ignores ESP32 boot/status noise, uploads only `iem.lora.rx.v1` telemetry lines, retries short cloud failures, and reconnects if the receiver serial port drops.
+
+For a no-hardware bridge test:
+
+```sh
+INGEST_TOKEN=<same-token-as-render> \
+BRIDGE_REPLAY_FILE=test/fixtures/base-station-sample.ndjson \
+BRIDGE_REPLAY_DELAY_MS=50 \
+npm run bridge:cloud
+```
+
+Only one process can read the receiver serial port at a time. For cloud sharing, run `npm run bridge:cloud` and view the Render dashboard. For purely local operation, run `npm start` instead.
 
 ## Current Radio Settings
 

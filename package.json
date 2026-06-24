@@ -7,6 +7,7 @@
     "start": "node server/index.js",
     "start:cloud": "CLOUD_ONLY=1 node server/index.js",
     "start:emulator": "EMULATOR=1 node server/index.js",
+    "bridge:cloud": "node server/serial-bridge.js",
     "dev": "node --watch server/index.js",
     "test": "node --test",
     "tunnel": "npm run tunnel:cloudflare",
