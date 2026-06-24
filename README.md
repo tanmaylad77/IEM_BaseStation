@@ -92,9 +92,11 @@ npm run start:emulator
 
 The dashboard stores packets under `data/`, streams live updates over WebSocket, and exports each run as CSV from the dashboard export button or `GET /api/runs/:id/export.csv`.
 
-## Cloud Dashboard
+## Optional Cloud Ingest Server
 
-For the cloud-hosted race setup, deploy this repo as a Render Web Service. The included `render.yaml` uses:
+The receiver firmware is serial-only. It does not join Wi-Fi or upload directly to the cloud.
+
+The Node app still has an optional cloud-ingest mode for emulator testing or a future serial-to-cloud bridge. To deploy that server on Render, the included `render.yaml` uses:
 
 ```text
 Build command: npm install
@@ -109,7 +111,7 @@ CLOUD_ONLY=1
 INGEST_TOKEN=<long-random-secret>
 ```
 
-The ESP32 base station uploads telemetry to:
+External clients can upload telemetry to:
 
 ```text
 https://<your-render-service>.onrender.com/api/ingest
@@ -130,7 +132,7 @@ Responses:
 401 missing or wrong ingest token
 ```
 
-Configure the ESP32 by copying `include/secrets.example.h` to `include/secrets.h` and filling in `WIFI_SSID`, `WIFI_PASSWORD`, `INGEST_URL`, and `INGEST_TOKEN`.
+Race-day operation currently uses the USB Serial dashboard plus Cloudflare Quick Tunnel.
 
 ## Current Radio Settings
 

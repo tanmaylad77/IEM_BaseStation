@@ -1,41 +1,10 @@
 #include <Arduino.h>
 #include <Adafruit_BusIO_Register.h>
-#include <HTTPClient.h>
 #include <RadioLib.h>
 #include <SPI.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <stdlib.h>
 #include <string.h>
-
-#if __has_include("secrets.h")
-#include "secrets.h"
-#endif
-
-#ifndef WIFI_SSID
-#define WIFI_SSID ""
-#endif
-
-#ifndef WIFI_PASSWORD
-#define WIFI_PASSWORD ""
-#endif
-
-#ifndef WIFI_BACKUP_SSID
-#define WIFI_BACKUP_SSID ""
-#endif
-
-#ifndef WIFI_BACKUP_PASSWORD
-#define WIFI_BACKUP_PASSWORD ""
-#endif
-
-#ifndef INGEST_URL
-#define INGEST_URL ""
-#endif
-
-#ifndef INGEST_TOKEN
-#define INGEST_TOKEN ""
-#endif
 
 #define SERIAL_BAUD 115200
 
@@ -57,24 +26,10 @@
 #define LORA_POWER_DBM 10
 #define LORA_PREAMBLE_LEN 8
 #define LORA_GAIN 0
-#define WIFI_RECONNECT_INTERVAL_MS 5000
-#define CLOUD_UPLOAD_INTERVAL_MS 1000
-#define CLOUD_UPLOAD_TIMEOUT_MS 2500
-#define CLOUD_UPLOAD_QUEUE_LEN 8
-#define CLOUD_UPLOAD_JSON_MAX 1024
 
 SX1278 radio = new Module(LORA_CS, LORA_INT, LORA_RST);
 
 static uint32_t packetSequence = 0;
-static uint32_t lastWifiAttemptMs = 0;
-static uint32_t lastCloudUploadMs = 0;
-static uint8_t wifiNetworkIndex = 0;
-static QueueHandle_t cloudUploadQueue = nullptr;
-static SemaphoreHandle_t serialMutex = nullptr;
-
-struct CloudUploadEvent {
-  char json[CLOUD_UPLOAD_JSON_MAX];
-};
 
 struct ParsedTelemetryPacket {
   bool matched = false;
@@ -218,9 +173,6 @@ static ParsedTelemetryPacket parseTelemetryPacket(const String &payload) {
 }
 
 static void printStatusEvent(const char *event, int code = RADIOLIB_ERR_NONE) {
-  if (serialMutex != nullptr) {
-    xSemaphoreTake(serialMutex, portMAX_DELAY);
-  }
   Serial.print("{\"schema\":\"iem.base.status.v1\",\"type\":\"status\",\"ms\":");
   Serial.print(millis());
   Serial.print(",\"event\":\"");
@@ -231,9 +183,6 @@ static void printStatusEvent(const char *event, int code = RADIOLIB_ERR_NONE) {
     Serial.print(code);
   }
   Serial.println("}");
-  if (serialMutex != nullptr) {
-    xSemaphoreGive(serialMutex);
-  }
 }
 
 static String formatReceiveEvent(const String &payload) {
@@ -322,165 +271,24 @@ static void setupLoRa() {
   printStatusEvent("radio_ready");
 }
 
-static bool hasCloudConfig() {
-  return strlen(WIFI_SSID) > 0 && strlen(INGEST_URL) > 0 && strlen(INGEST_TOKEN) > 0;
-}
-
-static const char *wifiSsidForIndex(uint8_t index) {
-  return index == 1 ? WIFI_BACKUP_SSID : WIFI_SSID;
-}
-
-static const char *wifiPasswordForIndex(uint8_t index) {
-  return index == 1 ? WIFI_BACKUP_PASSWORD : WIFI_PASSWORD;
-}
-
-static uint8_t wifiNetworkCount() {
-  return strlen(WIFI_BACKUP_SSID) > 0 ? 2 : 1;
-}
-
-static void beginWiFiConnection() {
-  const char *ssid = wifiSsidForIndex(wifiNetworkIndex);
-  const char *password = wifiPasswordForIndex(wifiNetworkIndex);
-
-  if (strlen(password) == 0) {
-    WiFi.begin(ssid);
-  } else {
-    WiFi.begin(ssid, password);
-  }
-}
-
-static void setupWiFi() {
-  if (!hasCloudConfig()) {
-    printStatusEvent("cloud_upload_disabled");
-    return;
-  }
-
-  WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
-  beginWiFiConnection();
-  lastWifiAttemptMs = millis();
-  printStatusEvent("wifi_connecting");
-}
-
-static void maintainWiFi() {
-  if (!hasCloudConfig() || WiFi.status() == WL_CONNECTED) {
-    return;
-  }
-
-  if (millis() - lastWifiAttemptMs >= WIFI_RECONNECT_INTERVAL_MS) {
-    lastWifiAttemptMs = millis();
-    WiFi.disconnect();
-    wifiNetworkIndex = (wifiNetworkIndex + 1) % wifiNetworkCount();
-    beginWiFiConnection();
-    printStatusEvent("wifi_reconnecting");
-  }
-}
-
-static void uploadTelemetry(const String &event) {
-  if (!hasCloudConfig()) {
-    return;
-  }
-
-  if (millis() - lastCloudUploadMs < CLOUD_UPLOAD_INTERVAL_MS) {
-    return;
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    maintainWiFi();
-    return;
-  }
-
-  lastCloudUploadMs = millis();
-
-  WiFiClientSecure client;
-  client.setInsecure();
-
-  HTTPClient http;
-  http.setTimeout(CLOUD_UPLOAD_TIMEOUT_MS);
-  if (!http.begin(client, INGEST_URL)) {
-    printStatusEvent("cloud_http_begin_failed");
-    return;
-  }
-
-  http.addHeader("content-type", "application/json");
-  http.addHeader("x-ingest-token", INGEST_TOKEN);
-  int status = http.POST((uint8_t *)event.c_str(), event.length());
-
-  if (status < 200 || status >= 300) {
-    if (serialMutex != nullptr) {
-      xSemaphoreTake(serialMutex, portMAX_DELAY);
-    }
-    Serial.print("{\"schema\":\"iem.base.status.v1\",\"type\":\"status\",\"ms\":");
-    Serial.print(millis());
-    Serial.print(",\"event\":\"cloud_upload_failed\",\"code\":");
-    Serial.print(status);
-    Serial.println("}");
-    if (serialMutex != nullptr) {
-      xSemaphoreGive(serialMutex);
-    }
-  }
-
-  http.end();
-}
-
-static void enqueueCloudUpload(const String &event) {
-  if (cloudUploadQueue == nullptr || !hasCloudConfig()) {
-    return;
-  }
-
-  CloudUploadEvent queued;
-  event.toCharArray(queued.json, sizeof(queued.json));
-  xQueueSend(cloudUploadQueue, &queued, 0);
-}
-
-static void cloudUploadTask(void *pvParameters) {
-  (void)pvParameters;
-  CloudUploadEvent queued;
-
-  for (;;) {
-    maintainWiFi();
-    if (cloudUploadQueue != nullptr && xQueueReceive(cloudUploadQueue, &queued, pdMS_TO_TICKS(100)) == pdTRUE) {
-      uploadTelemetry(String(queued.json));
-    }
-  }
-}
-
 void setup() {
   Serial.begin(SERIAL_BAUD);
   delay(2000);
-  serialMutex = xSemaphoreCreateMutex();
 
   setupPins();
   printStatusEvent("boot");
   setupLoRa();
-  setupWiFi();
-  if (hasCloudConfig()) {
-    cloudUploadQueue = xQueueCreate(CLOUD_UPLOAD_QUEUE_LEN, sizeof(CloudUploadEvent));
-    if (cloudUploadQueue == nullptr) {
-      printStatusEvent("cloud_queue_failed");
-    } else {
-      xTaskCreatePinnedToCore(cloudUploadTask, "cloudUpload", 12000, nullptr, 1, nullptr, 0);
-    }
-  }
+  printStatusEvent("serial_only");
 }
 
 void loop() {
-  maintainWiFi();
-
   String payload;
   int state = radio.receive(payload);
 
   if (state == RADIOLIB_ERR_NONE) {
     digitalWrite(LED, HIGH);
     String event = formatReceiveEvent(payload);
-    if (serialMutex != nullptr) {
-      xSemaphoreTake(serialMutex, portMAX_DELAY);
-    }
     Serial.println(event);
-    if (serialMutex != nullptr) {
-      xSemaphoreGive(serialMutex);
-    }
-    enqueueCloudUpload(event);
     digitalWrite(LED, LOW);
   } else if (state != RADIOLIB_ERR_RX_TIMEOUT) {
     printStatusEvent("receive_failed", state);
