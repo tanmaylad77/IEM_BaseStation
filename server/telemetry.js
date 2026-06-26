@@ -71,6 +71,13 @@ export function normalizePacket(packet, receivedAtMs = Date.now()) {
   };
 }
 
+export function hasValidGps(record) {
+  if (!record?.gps_fix || !Number.isFinite(record.latitude) || !Number.isFinite(record.longitude)) {
+    return false;
+  }
+  return record.valid_flags === null || record.valid_flags !== 0;
+}
+
 export function integrateWh(previousRecord, currentRecord, currentAggregateWh) {
   if (!previousRecord || !Number.isFinite(currentRecord.pack_power_w)) {
     return currentAggregateWh;
@@ -128,10 +135,10 @@ export function detectLapCrossing(startLine, previousRecord, currentRecord, last
   if (!startLine || !previousRecord || !currentRecord) {
     return false;
   }
-  if (!Number.isFinite(previousRecord.latitude) || !Number.isFinite(previousRecord.longitude)) {
+  if (!hasValidGps(previousRecord)) {
     return false;
   }
-  if (!Number.isFinite(currentRecord.latitude) || !Number.isFinite(currentRecord.longitude)) {
+  if (!hasValidGps(currentRecord)) {
     return false;
   }
   if (lastCrossingMs && currentRecord.received_at_ms - lastCrossingMs < 15000) {

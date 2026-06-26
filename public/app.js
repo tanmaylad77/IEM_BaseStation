@@ -10,19 +10,6 @@ const state = {
   draggedPanelId: null
 };
 
-const SILESIA_RING_CENTER = [50.528144, 18.096021];
-const SILESIA_TRACK_OUTLINE = [
-  [50.531350, 18.095750],
-  [50.530740, 18.099050],
-  [50.529120, 18.101100],
-  [50.526950, 18.100060],
-  [50.525320, 18.096420],
-  [50.525760, 18.092840],
-  [50.527580, 18.090900],
-  [50.529880, 18.091840],
-  [50.531350, 18.095750]
-];
-
 const els = Object.fromEntries([
   "connectionText", "runStatus", "elapsed", "laps", "delta", "predicted", "efficiency",
   "power", "powerFill", "powerHint", "energy", "energyFill", "energyHint",
@@ -210,20 +197,12 @@ function initMap() {
   state.map = L.map("trackMap", {
     zoomControl: true,
     attributionControl: true
-  }).setView(SILESIA_RING_CENTER, 15);
+  }).setView([0, 0], 2);
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors"
   }).addTo(state.map);
-
-  state.trackLine = L.polyline(SILESIA_TRACK_OUTLINE, {
-    color: "#1f7a8c",
-    weight: 4,
-    opacity: 0.85
-  }).addTo(state.map);
-
-  state.map.fitBounds(state.trackLine.getBounds(), { padding: [24, 24] });
 }
 
 function updateMap(latest) {
@@ -231,8 +210,7 @@ function updateMap(latest) {
     return;
   }
 
-  const hasFix = latest.gps_fix && Number.isFinite(latest.latitude) && Number.isFinite(latest.longitude);
-  if (!hasFix) {
+  if (!hasValidGps(latest)) {
     els.mapStatus.textContent = "Waiting for GPS";
     return;
   }
@@ -593,8 +571,8 @@ function calculateMetrics(race, profile, latest, elapsedS, targetS, records = []
 }
 
 function runFractionSinceStart(latest, records) {
-  if (!latest?.gps_fix || records.length < 2) return 0;
-  const first = records.find(record => record.gps_fix && Number.isFinite(record.latitude) && Number.isFinite(record.longitude));
+  if (!hasValidGps(latest) || records.length < 2) return 0;
+  const first = records.find(hasValidGps);
   if (!first) return 0;
   const startFraction = estimateTrackFraction(first.latitude, first.longitude);
   const latestFraction = estimateTrackFraction(latest.latitude, latest.longitude);
@@ -631,6 +609,13 @@ function estimateTrackFraction(latitude, longitude) {
     }
   }
   return clamp(best.along / total, 0, 0.999);
+}
+
+function hasValidGps(record) {
+  if (!record?.gps_fix || !Number.isFinite(record.latitude) || !Number.isFinite(record.longitude)) {
+    return false;
+  }
+  return record.valid_flags === null || record.valid_flags !== 0;
 }
 
 function projectMeters(latitude, longitude) {

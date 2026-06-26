@@ -3,6 +3,7 @@ import {
   computeTargetDelta,
   createStartLineFromRecentPoints,
   detectLapCrossing,
+  hasValidGps,
   integrateWh
 } from "./telemetry.js";
 
@@ -97,7 +98,7 @@ export class RaceState {
 
   ingest(packet) {
     this.store.appendPacket(packet);
-    if (Number.isFinite(packet.latitude) && Number.isFinite(packet.longitude) && packet.gps_fix) {
+    if (hasValidGps(packet)) {
       this.recentGps.push(packet);
       this.recentGps = this.recentGps.slice(-20);
     }

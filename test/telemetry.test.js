@@ -14,6 +14,7 @@ import { Store } from "../server/store.js";
 import {
   computeTargetDelta,
   detectLapCrossing,
+  hasValidGps,
   integrateWh,
   nmeaToDecimal,
   normalizePacket,
@@ -83,10 +84,19 @@ test("computes target delta from completed lap count", () => {
 
 test("detects line crossings and rejects immediate double counts", () => {
   const startLine = { latitude: 0, longitude: 0, heading_deg: 90 };
-  const before = { latitude: 0, longitude: -0.0001, received_at_ms: 1000 };
-  const after = { latitude: 0, longitude: 0.0001, received_at_ms: 2000 };
+  const before = { gps_fix: 1, valid_flags: 1, latitude: 0, longitude: -0.0001, received_at_ms: 1000 };
+  const after = { gps_fix: 1, valid_flags: 1, latitude: 0, longitude: 0.0001, received_at_ms: 2000 };
   assert.equal(detectLapCrossing(startLine, before, after, null), true);
   assert.equal(detectLapCrossing(startLine, before, after, 1500), false);
+});
+
+test("rejects GPS points when telemetry valid flags are zero", () => {
+  const valid = { gps_fix: 1, valid_flags: 7, latitude: 50.5, longitude: 18.1 };
+  const missingFlags = { gps_fix: 1, valid_flags: null, latitude: 50.5, longitude: 18.1 };
+  const invalid = { gps_fix: 1, valid_flags: 0, latitude: 50.5, longitude: 18.1 };
+  assert.equal(hasValidGps(valid), true);
+  assert.equal(hasValidGps(missingFlags), true);
+  assert.equal(hasValidGps(invalid), false);
 });
 
 test("generates CSV with exact headings and stable row values", () => {
@@ -222,6 +232,12 @@ test("HTTP ingest endpoint enforces token and validates packets", async () => {
       body: "ESP-ROM:esp32s3-20210327"
     });
     assert.equal(bootNoise.status, 400);
+
+    await fetch(`http://localhost:${port}/api/run/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetFinishS: 2040, energyBudgetWh: 12 })
+    });
 
     const valid = await fetch(`http://localhost:${port}/api/ingest`, {
       method: "POST",
